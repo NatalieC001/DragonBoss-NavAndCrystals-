@@ -30,7 +30,6 @@ public class BossNavigator : MonoBehaviour, IMessageHandler
     [SerializeField] private PathTypeTag.PathType pathType = PathTypeTag.PathType.Airborne;
 
     [Header("Scene Targets")]
-    [SerializeField] private HealthCrystal defendCrystal;
     [SerializeField] private BossStatsAndHealth vitals;
 
     [Header("Defend")]
@@ -43,6 +42,10 @@ public class BossNavigator : MonoBehaviour, IMessageHandler
     private CreatureStatusEffects statusEffects;
     private bool defending;
     private SplineComputer pendingSpline;
+    private List<HealthCrystal> activeCrystals = new List<HealthCrystal>();
+    private HealthCrystal recentlyAttackedCrystal;
+    private float lastAttackTime;
+    private HealthCrystal currentDefendTarget;
     private double pendingSplineEntryPercent;
     private bool pendingSplineEntryValid;
 
@@ -78,6 +81,44 @@ public class BossNavigator : MonoBehaviour, IMessageHandler
         transform.position = flightBounds.ClampToBounds(transform.position);
 
         PickNewDestination();
+    }
+
+    private void OnEnable()
+    {
+        HealthCrystal.OnCrystalSpawned += HandleCrystalSpawned;
+        HealthCrystal.OnCrystalDestroyed += HandleCrystalDestroyed;
+        HealthCrystal.OnCrystalUnderAttack += HandleCrystalDamaged;
+    }
+
+    private void OnDisable()
+    {
+        HealthCrystal.OnCrystalSpawned -= HandleCrystalSpawned;
+        HealthCrystal.OnCrystalDestroyed -= HandleCrystalDestroyed;
+        HealthCrystal.OnCrystalUnderAttack -= HandleCrystalDamaged;
+    }
+
+    private void HandleCrystalSpawned(HealthCrystal crystal)
+    {
+        if (crystal != null && !activeCrystals.Contains(crystal))
+            activeCrystals.Add(crystal);
+    }
+
+    private void HandleCrystalDestroyed(HealthCrystal crystal)
+    {
+        if (activeCrystals.Contains(crystal))
+            activeCrystals.Remove(crystal);
+
+        if (recentlyAttackedCrystal == crystal)
+            recentlyAttackedCrystal = null;
+
+        if (currentDefendTarget == crystal)
+            ExitDefend();
+    }
+
+    private void HandleCrystalDamaged(HealthCrystal crystal)
+    {
+        recentlyAttackedCrystal = crystal;
+        lastAttackTime = Time.time;
     }
 
     private void Update()
@@ -129,7 +170,8 @@ public class BossNavigator : MonoBehaviour, IMessageHandler
 
     public void HoldPosition() { PickNewDestination(); }
 
-    public HealthCrystal DefendCrystal => defendCrystal;
+    public HealthCrystal DefendCrystal => currentDefendTarget;
+    public bool HasActiveCrystals => activeCrystals.Count > 0;
 
     public void OnMessage(MessageArgs messageArgs)
     {
@@ -212,20 +254,46 @@ public class BossNavigator : MonoBehaviour, IMessageHandler
 
     private void HandleDefend()
     {
-        if (defendCrystal == null) return;
-        SetDestination(defendCrystal.transform.position);
-        defending = true;
+        if (activeCrystals.Count == 0) return;
+
+        if (recentlyAttackedCrystal != null && !recentlyAttackedCrystal.IsDestroyed && (Time.time - lastAttackTime < 5f))
+        {
+            currentDefendTarget = recentlyAttackedCrystal;
+        }
+        else
+        {
+            recentlyAttackedCrystal = null; // Clear if destroyed or timed out
+            float minDistance = float.MaxValue;
+            HealthCrystal nearest = null;
+            foreach (var crystal in activeCrystals)
+            {
+                if (crystal == null || crystal.IsDestroyed) continue;
+                float dist = Vector3.Distance(transform.position, crystal.transform.position);
+                if (dist < minDistance)
+                {
+                    minDistance = dist;
+                    nearest = crystal;
+                }
+            }
+            if (nearest != null) currentDefendTarget = nearest;
+        }
+
+        if (currentDefendTarget != null)
+        {
+            SetDestination(currentDefendTarget.transform.position);
+            defending = true;
+        }
     }
 
     private void CheckDefendArrival()
     {
-        if (!defending || defendCrystal == null || vitals == null) return;
+        if (!defending || currentDefendTarget == null || vitals == null) return;
 
-        if (defendCrystal.IsDestroyed) { ExitDefend(); return; }
+        if (currentDefendTarget.IsDestroyed) { ExitDefend(); return; }
 
-        if (Vector3.Distance(transform.position, defendCrystal.transform.position) <= defendArrivalRadius)
+        if (Vector3.Distance(transform.position, currentDefendTarget.transform.position) <= defendArrivalRadius)
         {
-            if (!vitals.IsShielding) { vitals.IsShielding = true; defendCrystal.BeginFeeding(vitals); PixelCrushers.MessageSystem.SendMessage(this, "DragonReachedCrystal", string.Empty); }
+            if (!vitals.IsShielding) { vitals.IsShielding = true; currentDefendTarget.BeginFeeding(vitals); PixelCrushers.MessageSystem.SendMessage(this, "DragonReachedCrystal", string.Empty); }
 
         }
     }
@@ -235,7 +303,8 @@ public class BossNavigator : MonoBehaviour, IMessageHandler
         if (defending) { PixelCrushers.MessageSystem.SendMessage(this, "DragonLeftCrystal", string.Empty); }
         defending = false;
         if (vitals != null) vitals.IsShielding = false;
-        if (defendCrystal != null) defendCrystal.StopFeeding();
+        if (currentDefendTarget != null) currentDefendTarget.StopFeeding();
+        currentDefendTarget = null;
     }
 
     private Vector3 ResolvePlayerPosition()
@@ -429,7 +498,7 @@ public class BossNavigator : MonoBehaviour, IMessageHandler
 //    [SerializeField] private PathTypeTag.PathType pathType = PathTypeTag.PathType.Airborne;
 
 //    [Header("Scene Targets")]
-//    [SerializeField] private HealthCrystal defendCrystal;
+//    [SerializeField] private HealthCrystal currentDefendTarget;
 //    [SerializeField] private BossStatsAndHealth vitals;
 
 //    [Header("Defend")]
@@ -533,20 +602,20 @@ public class BossNavigator : MonoBehaviour, IMessageHandler
 
 //    private void HandleDefend()
 //    {
-//        if (defendCrystal == null) return;
-//        SetDestination(defendCrystal.transform.position);
+//        if (currentDefendTarget == null) return;
+//        SetDestination(currentDefendTarget.transform.position);
 //        defending = true;
 //    }
 
 //    private void CheckDefendArrival()
 //    {
-//        if (!defending || defendCrystal == null || vitals == null) return;
+//        if (!defending || currentDefendTarget == null || vitals == null) return;
 
-//        if (defendCrystal.IsDestroyed) { ExitDefend(); return; }
+//        if (currentDefendTarget.IsDestroyed) { ExitDefend(); return; }
 
-//        if (Vector3.Distance(transform.position, defendCrystal.transform.position) <= defendArrivalRadius)
+//        if (Vector3.Distance(transform.position, currentDefendTarget.transform.position) <= defendArrivalRadius)
 //        {
-//            if (!vitals.IsShielding) { vitals.IsShielding = true; defendCrystal.BeginFeeding(vitals); PixelCrushers.MessageSystem.SendMessage(this, "DragonReachedCrystal", string.Empty); }
+//            if (!vitals.IsShielding) { vitals.IsShielding = true; currentDefendTarget.BeginFeeding(vitals); PixelCrushers.MessageSystem.SendMessage(this, "DragonReachedCrystal", string.Empty); }
 //
 //        }
 //    }
@@ -555,7 +624,7 @@ public class BossNavigator : MonoBehaviour, IMessageHandler
 //    {
 //        if (defending) { PixelCrushers.MessageSystem.SendMessage(this, "DragonLeftCrystal", string.Empty); } defending = false;
 //        if (vitals != null) vitals.IsShielding = false;
-//        if (defendCrystal != null) defendCrystal.StopFeeding();
+//        if (currentDefendTarget != null) currentDefendTarget.StopFeeding();
 //    }
 
 //    private Vector3 ResolvePlayerPosition()
@@ -765,7 +834,7 @@ public class BossNavigator : MonoBehaviour, IMessageHandler
 //    [SerializeField] private PathTypeTag.PathType pathType = PathTypeTag.PathType.Airborne;
 
 //    [Header("Scene Targets")]
-//    [SerializeField] private HealthCrystal defendCrystal;
+//    [SerializeField] private HealthCrystal currentDefendTarget;
 //    [SerializeField] private BossStatsAndHealth vitals;
 
 //    [Header("Defend")]
@@ -916,8 +985,8 @@ public class BossNavigator : MonoBehaviour, IMessageHandler
 //    /// </summary>
 //    private void HandleDefend()
 //    {
-//        if (defendCrystal == null) return;
-//        Freestyle(defendCrystal.transform.position);
+//        if (currentDefendTarget == null) return;
+//        Freestyle(currentDefendTarget.transform.position);
 //        defending = true;
 //    }
 
@@ -928,17 +997,17 @@ public class BossNavigator : MonoBehaviour, IMessageHandler
 //    /// </summary>
 //    private void CheckDefendArrival()
 //    {
-//        if (!defending || defendCrystal == null || vitals == null) return;
+//        if (!defending || currentDefendTarget == null || vitals == null) return;
 
-//        if (defendCrystal.IsDestroyed)
+//        if (currentDefendTarget.IsDestroyed)
 //        {
 //            ExitDefend();
 //            return;
 //        }
 
-//        if (Vector3.Distance(transform.position, defendCrystal.transform.position) <= defendArrivalRadius)
+//        if (Vector3.Distance(transform.position, currentDefendTarget.transform.position) <= defendArrivalRadius)
 //        {
-//            if (!vitals.IsShielding) { vitals.IsShielding = true; defendCrystal.BeginFeeding(vitals); PixelCrushers.MessageSystem.SendMessage(this, "DragonReachedCrystal", string.Empty); }
+//            if (!vitals.IsShielding) { vitals.IsShielding = true; currentDefendTarget.BeginFeeding(vitals); PixelCrushers.MessageSystem.SendMessage(this, "DragonReachedCrystal", string.Empty); }
 //
 //        }
 //    }
@@ -947,7 +1016,7 @@ public class BossNavigator : MonoBehaviour, IMessageHandler
 //    {
 //        if (defending) { PixelCrushers.MessageSystem.SendMessage(this, "DragonLeftCrystal", string.Empty); } defending = false;
 //        if (vitals != null) vitals.IsShielding = false;
-//        if (defendCrystal != null) defendCrystal.StopFeeding();
+//        if (currentDefendTarget != null) currentDefendTarget.StopFeeding();
 //    }
 
 //    private Vector3 ResolvePlayerPosition()
