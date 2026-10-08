@@ -1,0 +1,3 @@
+BossNavigator.cs: Needs to maintain a dynamic list of active health crystals, subscribe to MessageSystem events (CrystalSpawned, CrystalDestroyed, CrystalUnderAttack), and update its target DefendCrystal dynamically based on which one is under attack or nearest.
+HealthCrystal.cs: Needs to be updated to broadcast its lifecycle events (CrystalSpawned, CrystalDestroyed) and a CrystalUnderAttack event when it takes damage. (Note: I noticed this class is missing from the current repository files).
+DragonBrain.cs: Needs a minor update so that its state evaluation logic (HasDefendCrystal(), etc.) correctly accounts for the new dynamic crystal system rather than assuming a single static crystal.
