@@ -256,30 +256,48 @@ public class BossNavigator : MonoBehaviour, IMessageHandler
     {
         if (activeCrystals.Count == 0) return;
 
-        if (recentlyAttackedCrystal != null && !recentlyAttackedCrystal.IsDestroyed && (Time.time - lastAttackTime < 5f))
+        HealthCrystal bestCrystal = null;
+        float highestScore = -float.MaxValue;
+
+        Vector3 playerPos = ResolvePlayerPosition();
+        Vector3 dragonPos = transform.position;
+
+        foreach (var crystal in activeCrystals)
         {
-            currentDefendTarget = recentlyAttackedCrystal;
-        }
-        else
-        {
-            recentlyAttackedCrystal = null; // Clear if destroyed or timed out
-            float minDistance = float.MaxValue;
-            HealthCrystal nearest = null;
-            foreach (var crystal in activeCrystals)
+            if (crystal == null || crystal.IsDestroyed) continue;
+
+            float score = 0f;
+
+            // 1. Health Priority: Lower health = higher urgency (score up to 50)
+            float healthPct = crystal.CurrentHealth / Mathf.Max(crystal.MaxHealth, 1f);
+            score += (1f - healthPct) * 50f;
+
+            // 2. Threat Proximity: Player is near the crystal (score up to 30)
+            float playerDist = Vector3.Distance(crystal.transform.position, playerPos);
+            float threatScore = Mathf.Clamp01(1f - (playerDist / 20f)) * 30f;
+            score += threatScore;
+
+            // 3. Convenience: Is it close to the dragon? (score up to 20)
+            float dragonDist = Vector3.Distance(crystal.transform.position, dragonPos);
+            float convenienceScore = Mathf.Clamp01(1f - (dragonDist / 50f)) * 20f;
+            score += convenienceScore;
+
+            // 4. Active Fire Bonus
+            if (crystal == recentlyAttackedCrystal && (Time.time - lastAttackTime < 10f))
             {
-                if (crystal == null || crystal.IsDestroyed) continue;
-                float dist = Vector3.Distance(transform.position, crystal.transform.position);
-                if (dist < minDistance)
-                {
-                    minDistance = dist;
-                    nearest = crystal;
-                }
+                score += 40f;
             }
-            if (nearest != null) currentDefendTarget = nearest;
+
+            if (score > highestScore)
+            {
+                highestScore = score;
+                bestCrystal = crystal;
+            }
         }
 
-        if (currentDefendTarget != null)
+        if (bestCrystal != null)
         {
+            currentDefendTarget = bestCrystal;
             SetDestination(currentDefendTarget.transform.position);
             defending = true;
         }
