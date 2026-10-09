@@ -286,7 +286,7 @@ namespace VRDragonBoss.AI
 
         private bool HasDefendCrystal()
         {
-            return navigator != null && navigator.DefendCrystal != null;
+            return navigator != null && navigator.HasActiveCrystals;
         }
 
         private bool MinionsNeedDefense()

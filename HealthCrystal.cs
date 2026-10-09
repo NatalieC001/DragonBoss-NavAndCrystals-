@@ -51,8 +51,9 @@ public class HealthCrystal : MonoBehaviour, IArrowTarget
     public float CurrentHealth => currentHealth;
     public float MaxHealth => maxHealth;
 
-    public event Action<HealthCrystal> OnCrystalDestroyed;
-    public event Action<HealthCrystal> OnCrystalDamaged;
+    public static event Action<HealthCrystal> OnCrystalSpawned;
+    public static event Action<HealthCrystal> OnCrystalDestroyed;
+    public static event Action<HealthCrystal> OnCrystalUnderAttack;
 
     private void Reset()
     {
@@ -79,6 +80,8 @@ public class HealthCrystal : MonoBehaviour, IArrowTarget
     {
         currentHealth = maxHealth;
         if (string.IsNullOrEmpty(displayName)) displayName = gameObject.name;
+
+        OnCrystalSpawned?.Invoke(this);
 
         Collider col = GetComponent<Collider>();
         if (col == null)
@@ -111,7 +114,7 @@ public class HealthCrystal : MonoBehaviour, IArrowTarget
         float dmg = Mathf.Abs(amount);
         currentHealth -= dmg;
 
-        OnCrystalDamaged?.Invoke(this);
+        OnCrystalUnderAttack?.Invoke(this);
 
         MessageSystem.SendMessage(this, "CrystalDamaged", string.Empty, GetHealthNormalized());
 
